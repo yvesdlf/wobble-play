@@ -11,7 +11,7 @@
   var S = { on: false, qi: -1, a: {}, order: null, start: null, log: [], best: {}, swaps: {} };
   try { var saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved && typeof saved === "object" && saved.a) S = Object.assign(S, saved); } catch (e) {}
   function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
-  var sub = null;            // {t:'act'|'game', id}
+  var sub = null, lastY = 0, inApp = false;            // {t:'act'|'game', id}
   var filt = { skill: "all", age: true };
 
   function today() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
@@ -35,7 +35,7 @@
     { id: "age", sec: 0, type: "single", q: "How old is your child?", opts: [["3-4", "3 – 4"], ["5-6", "5 – 6"], ["7-9", "7 – 9"], ["10+", "10 or older"]] },
     { id: "challenge", sec: 0, type: "single", q: "What feels hardest right now?", opts: [["meltdowns", "Big meltdowns", "🌋"], ["focus", "Short attention span", "🦋"], ["screens", "Screen-time battles", "📱"], ["routines", "Bedtime and morning routines", "🌙"], ["siblings", "Sibling fights", "🥊"]] },
     { id: "i1", sec: 0, type: "info", pic: "hug", title: "Plenty of parents are right here with you",
-      body: function (a) { return ["At " + (a.age === "10+" ? "10 and up" : a.age.replace("-", " – ")) + ", " + CHALLENGE[a.challenge] + " come up in a lot of homes. It says very little about how well you parent.", "The next questions look at the everyday moments around it, so the plan fits your child and not an average one."]; } },
+      body: function (a) { return ["At " + (a.age === "10+" ? "10 and up" : a.age.replace("-", " – ")) + ", plenty of homes are dealing with " + CHALLENGE[a.challenge] + ". It says very little about how well you parent.", "The next questions look at the everyday moments around it, so the plan fits your child and not an average one."]; } },
     { id: "l_focus", sec: 1, type: "likert", area: "focus", q: function () { return "My child drifts away from an activity after a few minutes"; } },
     { id: "l_wait", sec: 1, type: "likert", area: "patience", q: function (a) { return "Waiting for " + a.me.p + " turn is hard for my child"; } },
     { id: "l_impulse", sec: 1, type: "likert", area: "impulse", q: function () { return "My child often acts first and thinks about it afterwards"; } },
@@ -145,25 +145,33 @@
   }
 
   /* ---------- app views ---------- */
-  function route() { var h = location.hash.replace("#", ""); return ["today", "activities", "games", "progress"].indexOf(h) >= 0 ? h : "today"; }
+  function parseHash() {
+    var p = location.hash.replace("#", "").split("/"), r = ["today", "activities", "games", "progress"].indexOf(p[0]) >= 0 ? p[0] : "today";
+    return { r: r, sub: (p[1] === "act" || p[1] === "game") && p[2] ? { t: p[1], id: p[2] } : null };
+  }
+  function route() { return parseHash().r; }
+  /* Detail pages live in the hash so the browser Back button returns to the list. */
+  function openSub(t, id) { lastY = window.scrollY; inApp = true; location.hash = route() + "/" + t + "/" + id; }
+  function closeSub() { kill(); if (inApp) { inApp = false; history.back(); } else location.replace("#" + route()); }
   function actCard(a, extra) {
     var done = doneToday(a.id);
-    return '<div class="item' + (done ? " done" : "") + '"><span class="tag">' + esc(SKILLS[a.skill]) + "</span><h3>" + (done ? '<span class="tick" aria-label="Done"></span>' : "") + esc(a.name) + '</h3><p class="meta">' + a.mins + " min · " + esc(a.need) + '</p><div class="row"><button type="button" class="btn go" data-open="' + a.id + '">' + (done ? "Play again" : "Open") + "</button>" + (extra || "") + "</div></div>";
+    return '<div class="item' + (done ? " done" : "") + '"><span class="tag">' + esc(SKILLS[a.skill]) + "</span><h3>" + (done ? '<span class="tick" aria-label="Done"></span>' : "") + esc(a.name) + '</h3><p class="meta">' + a.mins + " min · " + esc(a.need) + "</p>" + (a.prep ? '<p class="prep">Plan ahead: ' + esc(a.prep) + "</p>" : "") + '<div class="row"><button type="button" class="btn go" data-open="' + a.id + '">' + (done ? "Play again" : "Open") + "</button>" + (extra || "") + "</div></div>";
   }
   function gameCard(g) {
     var done = doneToday(g.id), b = S.best[g.id];
     return '<div class="item' + (done ? " done" : "") + '"><span class="tag">' + esc(SKILLS[g.skill]) + "</span><h3>" + (done ? '<span class="tick" aria-label="Done"></span>' : "") + esc(g.name) + "</h3><p>" + esc(g.blurb) + '</p><p class="meta">' + g.mins + " min on screen" + (b != null ? " · Best: " + b + " " + g.unit : "") + '</p><div class="row"><button type="button" class="btn go" data-game="' + g.id + '">Play</button></div></div>';
   }
   function wire() {
-    stage.querySelectorAll("[data-open]").forEach(function (b) { b.onclick = function () { sub = { t: "act", id: b.dataset.open }; render(true); window.scrollTo(0, 0); }; });
-    stage.querySelectorAll("[data-game]").forEach(function (b) { b.onclick = function () { sub = { t: "game", id: b.dataset.game }; render(true); window.scrollTo(0, 0); }; });
+    stage.querySelectorAll("[data-open]").forEach(function (b) { b.onclick = function () { openSub("act", b.dataset.open); }; });
+    stage.querySelectorAll("[data-game]").forEach(function (b) { b.onclick = function () { openSub("game", b.dataset.game); }; });
   }
 
   function viewToday() {
     var d = dayNum(), p = planFor(S.a, S.order, d, S.swaps);
     var total = p.acts.length + 1, done = p.acts.filter(function (a) { return doneToday(a.id); }).length + (doneToday(p.game.id) ? 1 : 0);
+    var mins = p.acts.reduce(function (t, a) { return t + a.mins; }, 0);
     var head = d <= 28 ? "Day " + d + " of 28" : "Day " + d + " · free play";
-    stage.innerHTML = '<div><p class="eyebrow">' + head + " · Week " + p.week + "</p><h1>" + esc(p.theme) + '</h1></div><div class="panel"><div class="row" style="justify-content:space-between"><b>' + done + " of " + total + ' done today</b><span class="meta">' + S.a.time + ' min plan</span></div><div class="meter"><i style="width:' + (done / total * 100) + '%"></i></div></div>'
+    stage.innerHTML = '<div><p class="eyebrow">' + head + " · Week " + p.week + "</p><h1>" + esc(p.theme) + '</h1></div><div class="panel"><div class="row" style="justify-content:space-between"><b>' + done + " of " + total + ' done today</b><span class="meta">' + mins + " min together + " + p.game.mins + ' min game</span></div><div class="meter"><i style="width:' + (done / total * 100) + '%"></i></div></div>'
       + "<h2>Play together</h2>" + p.acts.map(function (a, j) { return actCard(a, doneToday(a.id) ? "" : '<button type="button" class="btn" data-swap="' + j + '">Swap</button>'); }).join("")
       + "<h2>On-screen game</h2>" + gameCard(p.game)
       + (done === total ? '<div class="panel"><h3>That is today done</h3><p>' + esc(kidName()) + " can pick anything from Activities or Games for extra play. A new plan appears tomorrow.</p></div>" : "");
@@ -184,19 +192,19 @@
   }
 
   function viewAct(id) {
-    var a = ACTS.filter(function (x) { return x.id === id; })[0]; if (!a) { sub = null; return render(false); }
+    var a = ACTS.filter(function (x) { return x.id === id; })[0]; if (!a) { sub = null; location.replace("#" + route()); return render(false); }
     var n = S.log.filter(function (l) { return l.id === id; }).length;
     stage.innerHTML = '<button type="button" class="btn" id="bk" style="align-self:flex-start">Back</button><div><span class="tag">' + esc(SKILLS[a.skill]) + "</span><h1>" + esc(a.name) + '</h1><p class="meta">' + a.mins + " min · Ages " + a.min + " to " + a.max + (a.go ? " · Works on the go" : "") + (n ? " · Played " + n + (n === 1 ? " time" : " times") : "") + "</p></div>"
-      + '<div class="panel"><p class="lab">You need</p><p>' + esc(a.need) + '</p><p class="lab">How to play</p><ol class="steps">' + a.steps.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + '</ol><div class="vary"><p><b>Make it easier:</b> ' + esc(a.easier) + "</p><p><b>Make it harder:</b> " + esc(a.harder) + "</p></div></div>"
+      + '<div class="panel"><p class="lab">You need</p><p>' + esc(a.need) + "</p>" + (a.prep ? '<p class="prep">Plan ahead: ' + esc(a.prep) + "</p>" : "") + '<p class="lab">How to play</p><ol class="steps">' + a.steps.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + '</ol><div class="vary"><p><b>Make it easier:</b> ' + esc(a.easier) + "</p><p><b>Make it harder:</b> " + esc(a.harder) + "</p></div></div>"
       + '<div class="panel"><div class="clock" id="clock">' + a.mins + ':00</div><div class="row" style="justify-content:center"><button type="button" class="btn" id="tstart">Start timer</button></div></div>'
       + '<button type="button" class="cta" id="played">We played it</button>';
-    $("bk").onclick = function () { kill(); sub = null; render(true); };
+    $("bk").onclick = closeSub;
     var left = a.mins * 60, running = false;
     function show() { var c = $("clock"); if (c) c.textContent = Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0"); }
     var tg = 0;
     function tick(my) { if (!running || my !== tg) return; left--; show(); if (left <= 0) { running = false; $("tstart").textContent = "Time is up"; $("tstart").disabled = true; return; } later(function () { tick(my); }, 1000); }
     $("tstart").onclick = function () { running = !running; this.textContent = running ? "Pause" : "Resume"; if (running) { var my = ++tg; later(function () { tick(my); }, 1000); } };
-    $("played").onclick = function () { kill(); logIt("act", a.id, a.skill, a.mins); sub = null; render(true); };
+    $("played").onclick = function () { kill(); logIt("act", a.id, a.skill, a.mins); closeSub(); };
   }
 
   function viewGames() {
@@ -205,10 +213,10 @@
   }
 
   function viewGame(id) {
-    var g = GAME_LIST.filter(function (x) { return x.id === id; })[0]; if (!g) { sub = null; return render(false); }
+    var g = GAME_LIST.filter(function (x) { return x.id === id; })[0]; if (!g) { sub = null; location.replace("#" + route()); return render(false); }
     var age = AGE_N[S.a.age] || 6;
     stage.innerHTML = '<button type="button" class="btn" id="bk" style="align-self:flex-start">Back</button><div><span class="tag">' + esc(SKILLS[g.skill]) + "</span><h1>" + esc(g.name) + '</h1><p class="lede">' + esc(g.blurb) + '</p></div><div class="panel"><div class="gbox" id="gbox"><button type="button" class="cta" id="gstart">Start</button></div></div>';
-    $("bk").onclick = function () { kill(); sub = null; render(true); };
+    $("bk").onclick = closeSub;
     var box = $("gbox");
     function finish(score) {
       kill(); logIt("game", g.id, g.skill, g.mins);
@@ -220,7 +228,7 @@
       }
       box.innerHTML = '<h2 class="center">' + esc(msg) + '</h2><div class="row"><button type="button" class="btn go" id="again">Play again</button><button type="button" class="btn" id="fin">Done</button></div>';
       $("again").onclick = function () { box.innerHTML = ""; PLAY[g.id](box, age, finish); };
-      $("fin").onclick = function () { sub = null; render(true); };
+      $("fin").onclick = closeSub;
     }
     $("gstart").onclick = function () { box.innerHTML = ""; PLAY[g.id](box, age, finish); };
   }
@@ -376,7 +384,13 @@
     ({ today: viewToday, activities: viewActivities, games: viewGames, progress: viewProgress })[r]();
   }
   $("back").onclick = function () { qgo(S.qi - 1); };
-  window.addEventListener("hashchange", function () { sub = null; confirmErase = false; render(true); window.scrollTo(0, 0); });
+  var curR = route();
+  window.addEventListener("hashchange", function () {
+    var h = parseHash(), back = sub && !h.sub && h.r === curR;
+    sub = h.sub; curR = h.r; confirmErase = false; if (!sub) inApp = false;
+    render(true); window.scrollTo(0, back ? lastY : 0);
+  });
+  sub = parseHash().sub;
   if (!S.on && STEPS[S.qi] && STEPS[S.qi].type === "load") S.qi++;
   render(false);
 })();

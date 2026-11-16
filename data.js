@@ -205,7 +205,11 @@ var GAME_LIST = [
   { id: "freeze", name: "Freeze Screen", skill: "impulse", mins: 2, blurb: "Dance when the screen says dance. Freeze when it says freeze.", better: null, unit: "" }
 ];
 
-var WEEK_THEMES = ["Learn two games", "Add a second skill", "Use it in real moments", "Your child leads"];
+/* Activities that cannot be started on the spot. Kept out of the day's own picks and labelled wherever they appear. */
+var PREP = { icerescue: "freeze the toy in a tub of water the night before.", growjar: "this one runs for about a week, a minute a day after the first set-up." };
+ACTS.forEach(function (a) { a.prep = PREP[a.id] || null; });
+
+var WEEK_THEMES = ["Learn the first games", "Add a second skill", "Use it in real moments", "Your child leads"];
 
 function fits(act, ageKey) { var n = AGE_N[ageKey] || 6; return act.min <= n && n <= act.max; }
 
@@ -219,12 +223,21 @@ function planFor(profile, order, day, swaps) {
   var used = {}, out = [];
   for (var j = 0; j < n; j++) {
     var sk = lists[week][j];
-    var c = ACTS.filter(function (a) { return a.skill === sk && fits(a, profile.age); });
+    var all = ACTS.filter(function (a) { return a.skill === sk && fits(a, profile.age); });
+    if (!all.length) continue;
+    /* The day's own picks are short (about 5 minutes each, so the plan fits the time the parent chose)
+       and need no preparation. Longer and plan-ahead activities are reachable with Swap. */
+    var c = all.filter(function (a) { return !a.prep; });
     if (week === 3) { var g = c.filter(function (a) { return a.go; }); if (g.length >= 2) c = g; }
-    if (!c.length) continue;
-    var idx = (day * 5 + j * 2 + (swaps[day + "-" + j] || 0)) % c.length, tries = 0;
-    while (used[c[idx].id] && tries < c.length) { idx = (idx + 1) % c.length; tries++; }
-    used[c[idx].id] = 1; out.push(c[idx]);
+    var fit = c.filter(function (a) { return a.mins <= 5; });
+    if (!fit.length) fit = c.filter(function (a) { return a.mins <= 10; });
+    if (!fit.length) fit = c.length ? c : all;
+    var start = (day * 5 + j * 2) % fit.length;
+    var rest = all.filter(function (a) { return fit.indexOf(a) < 0; }).sort(function (x, y) { return x.mins - y.mins; });
+    var ring = fit.slice(start).concat(fit.slice(0, start), rest);
+    var idx = (swaps[day + "-" + j] || 0) % ring.length, tries = 0;
+    while (used[ring[idx].id] && tries < ring.length) { idx = (idx + 1) % ring.length; tries++; }
+    used[ring[idx].id] = 1; out.push(ring[idx]);
   }
   return { week: week, theme: WEEK_THEMES[week - 1], acts: out, game: GAME_LIST[(day - 1) % GAME_LIST.length] };
 }
